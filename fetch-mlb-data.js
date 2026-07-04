@@ -175,6 +175,43 @@ async function fetchTeamBattingSplit(teamId, sitCode, splitType) {
   }
 }
 
+async function fetchLast20Record(teamId, targetDateStr) {
+  try {
+    const target = new Date(targetDateStr);
+    const start = new Date(target);
+    start.setDate(start.getDate() - 35); // 20경기 확보 위해 넉넉히 35일 전부터
+    const startStr = start.toISOString().slice(0, 10);
+    const endStr = new Date(target.getTime() - 86400000).toISOString().slice(0, 10);
+
+    const data = await getJson(
+      `${MLB_API}/schedule?sportId=1&teamId=${teamId}&startDate=${startStr}&endDate=${endStr}`
+    );
+    const results = [];
+    (data.dates || []).forEach((d) => {
+      (d.games || []).forEach((g) => {
+        if (g.status.detailedState !== "Final") return;
+        const isHome = g.teams.home.team.id === teamId;
+        const myScore = isHome ? g.teams.home.score : g.teams.away.score;
+        const oppScore = isHome ? g.teams.away.score : g.teams.home.score;
+        if (myScore == null || oppScore == null) return;
+        results.push({ date: d.date, win: myScore > oppScore });
+      });
+    });
+    results.sort((a, b) => (a.date < b.date ? 1 : -1)); // 최신순
+    const last20 = results.slice(0, 20);
+    const wins = last20.filter((r) => r.win).length;
+    const losses = last20.length - wins;
+
+    await sbUpsert(
+      "mlb_team_stats",
+      { team_id: teamId, season: SEASON, last20_wins: wins, last20_losses: losses },
+      "team_id,season"
+    );
+  } catch (e) {
+    console.error("최근20경기 에러", teamId, e.message);
+  }
+}
+
 async function fetchStandings() {
   console.log("📊 팀 스탯(순위) 수집 중...");
   const data = await getJson(
@@ -208,6 +245,7 @@ async function fetchStandings() {
           away_losses: away ? away.losses : null,
           last10_wins: last10 ? last10.wins : null,
           last10_losses: last10 ? last10.losses : null,
+          streak_code: tr.streak ? tr.streak.streakCode : null,
           updated_at: new Date().toISOString()
         },
         "team_id,season"
@@ -216,6 +254,7 @@ async function fetchStandings() {
       await fetchTeamBattingSplit(tr.team.id, "vl", "vs_lhp");
       await fetchTeamBattingSplit(tr.team.id, "vr", "vs_rhp");
       await fetchConsecutiveGames(tr.team.id, TODAY);
+      await fetchLast20Record(tr.team.id, TODAY);
       await fetchTeamBatting(tr.team.id);
       await fetchBullpen(tr.team.id);
 
@@ -257,13 +296,21 @@ async function fetchPitcherExtended(playerId, teamId, seasonStat, gameDateStr) {
     const aData = await getJson(`${MLB_API}/people/${playerId}/stats?stats=statSplits&sitCodes=a&group=pitching&season=${SEASON}`);
     awayEra = parseFloat(aData.stats?.[0]?.splits?.[0]?.stat?.era) || null;
 
-    // 최근 등판일 / 휴식일
-    let lastGameDate = null, daysRest = null;
+    // 낮/야간 경기 ERA
+    let dayEra = null, nightEra = null;
+    const dData = await getJson(`${MLB_API}/people/${playerId}/stats?stats=statSplits&sitCodes=d&group=pitching&season=${SEASON}`);
+    dayEra = parseFloat(dData.stats?.[0]?.splits?.[0]?.stat?.era) || null;
+    const nData = await getJson(`${MLB_API}/people/${playerId}/stats?stats=statSplits&sitCodes=n&group=pitching&season=${SEASON}`);
+    nightEra = parseFloat(nData.stats?.[0]?.splits?.[0]?.stat?.era) || null;
+
+    // 최근 등판일 / 휴식일 / 직전 경기 투구수
+    let lastGameDate = null, daysRest = null, lastGamePitches = null;
     const logData = await getJson(`${MLB_API}/people/${playerId}/stats?stats=gameLog&group=pitching&season=${SEASON}`);
     const games = logData.stats?.[0]?.splits || [];
     if (games.length > 0) {
-      const dates = games.map((g) => g.date).sort();
-      lastGameDate = dates[dates.length - 1];
+      const sorted = [...games].sort((a, b) => (a.date < b.date ? 1 : -1)); // 최신순
+      lastGameDate = sorted[0].date;
+      lastGamePitches = sorted[0].stat?.numberOfPitches || null;
       if (gameDateStr && lastGameDate) {
         const diff = (new Date(gameDateStr) - new Date(lastGameDate)) / 86400000;
         daysRest = Math.round(diff);
@@ -277,7 +324,8 @@ async function fetchPitcherExtended(playerId, teamId, seasonStat, gameDateStr) {
         season: SEASON,
         k_pct: kPct, bb_pct: bbPct, k_bb_pct: kBbPct, hr9, babip,
         home_era: homeEra, away_era: awayEra,
-        days_rest: daysRest, last_game_date: lastGameDate
+        days_rest: daysRest, last_game_date: lastGameDate,
+        day_era: dayEra, night_era: nightEra, last_game_pitches: lastGamePitches
       },
       "player_id,season"
     );
