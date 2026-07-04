@@ -113,6 +113,42 @@ async function fetchGames() {
 }
 
 // ---------- 2. 팀 스탯 + 타격 스플릿 ----------
+async function fetchConsecutiveGames(teamId, targetDateStr) {
+  try {
+    const target = new Date(targetDateStr);
+    const start = new Date(target);
+    start.setDate(start.getDate() - 12);
+    const startStr = start.toISOString().slice(0, 10);
+    const endStr = new Date(target.getTime() - 86400000).toISOString().slice(0, 10);
+
+    const data = await getJson(`${MLB_API}/schedule?sportId=1&teamId=${teamId}&startDate=${startStr}&endDate=${endStr}`);
+    const playedDates = new Set();
+    (data.dates || []).forEach((d) => {
+      const hasGame = d.games && d.games.some((g) => g.status.detailedState !== "Postponed" && g.status.detailedState !== "Cancelled");
+      if (hasGame) playedDates.add(d.date);
+    });
+
+    let streak = 0;
+    let cursor = new Date(target.getTime() - 86400000);
+    while (playedDates.has(cursor.toISOString().slice(0, 10))) {
+      streak++;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    await sbUpsert(
+      "mlb_team_stats",
+      {
+        team_id: teamId, season: SEASON,
+        consecutive_games: streak,
+        last_game_date: [...playedDates].sort().pop() || null
+      },
+      "team_id,season"
+    );
+  } catch (e) {
+    console.error("연속경기 에러", teamId, e.message);
+  }
+}
+
 async function fetchTeamBattingSplit(teamId, sitCode, splitType) {
   try {
     const data = await getJson(
@@ -152,7 +188,7 @@ async function fetchStandings() {
       const last10 = (tr.records.splitRecords || []).find((s) => s.type === "lastTen");
       const rs = tr.runsScored ?? null;
       const ra = tr.runsAllowed ?? null;
-      const pyth = rs && ra ? Math.pow(rs, 2) / (Math.pow(rs, 2) + Math.pow(ra, 2)) : null;
+      const pyth = rs && ra ? Math.pow(rs, 1.83) / (Math.pow(rs, 1.83) + Math.pow(ra, 1.83)) : null;
 
       await sbUpsert(
         "mlb_team_stats",
@@ -179,6 +215,7 @@ async function fetchStandings() {
 
       await fetchTeamBattingSplit(tr.team.id, "vl", "vs_lhp");
       await fetchTeamBattingSplit(tr.team.id, "vr", "vs_rhp");
+      await fetchConsecutiveGames(tr.team.id, TODAY);
       await fetchTeamBatting(tr.team.id);
       await fetchBullpen(tr.team.id);
 
