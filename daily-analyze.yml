@@ -1,0 +1,22 @@
+name: MLB PICK 자동 분석 (21시)
+
+on:
+  schedule:
+    - cron: "0 12 * * *"   # UTC 12:00 = 한국시간(KST) 21:00
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: MLB 경기 분석 실행
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: node analyze-mlb.js
