@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MLB PICK</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --navy:#0b1e33;
+    --navy2:#122a45;
+    --cream:#f4f1e8;
+    --red:#c8372d;
+    --green:#2e7d5b;
+    --gray:#8a94a3;
+    --line:#26405e;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--navy); color:var(--cream);
+    font-family:-apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    min-height:100vh;
+  }
+  header{
+    padding:18px 20px; background:var(--navy2); border-bottom:2px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;
+  }
+  header h1{ margin:0; font-size:20px; letter-spacing:1px; }
+  header h1 span{ color:var(--red); }
+  nav{ display:flex; gap:6px; flex-wrap:wrap; }
+  nav button{
+    background:transparent; border:1px solid var(--line); color:var(--cream);
+    padding:8px 14px; border-radius:6px; cursor:pointer; font-size:14px;
+  }
+  nav button.active{ background:var(--red); border-color:var(--red); font-weight:600; }
+  main{ padding:20px; max-width:1000px; margin:0 auto; }
+  .card{
+    background:var(--navy2); border:1px solid var(--line); border-radius:10px;
+    padding:16px; margin-bottom:16px;
+  }
+  .card h2{ margin:0 0 12px; font-size:16px; color:var(--cream); display:flex; align-items:center; gap:8px; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  input, select{
+    background:var(--navy); border:1px solid var(--line); color:var(--cream);
+    padding:8px 10px; border-radius:6px; font-size:14px;
+  }
+  button.act{
+    background:var(--red); color:white; border:none; padding:9px 16px;
+    border-radius:6px; cursor:pointer; font-size:14px; font-weight:600;
+  }
+  button.act.secondary{ background:transparent; border:1px solid var(--gray); color:var(--cream); }
+  button.act:hover{ opacity:0.88; }
+  button.act:disabled{ opacity:0.4; cursor:default; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th,td{ padding:8px 6px; border-bottom:1px solid var(--line); text-align:left; }
+  th{ color:var(--gray); font-weight:500; font-size:12px; }
+  .tag{ display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:700; }
+  .tag.strong{ background:var(--green); color:white; }
+  .tag.mid{ background:#8a7a2e; color:white; }
+  .tag.weak{ background:var(--red); color:white; }
+  .muted{ color:var(--gray); font-size:12px; }
+  .hidden{ display:none; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .status{ font-size:12px; margin-top:8px; min-height:16px; }
+  .status.ok{ color:#7fd9a8; }
+  .status.err{ color:#ff8a80; }
+  .factor{ font-size:11px; color:var(--gray); margin-top:4px; }
+  a{ color:#8ec7ff; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚾ MLB <span>PICK</span></h1>
+  <nav id="tabNav">
+    <button data-tab="games" class="active">📅 오늘 경기</button>
+    <button data-tab="batters">🏏 타자</button>
+    <button data-tab="pitchers2">⚾ 투수</button>
+    <button data-tab="pick">🎯 추천</button>
+    <button data-tab="odds">💰 배당입력</button>
+    <button data-tab="backtest">🔍 백테스트</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ============ 오늘 경기 ============ -->
+  <section id="tab-games" class="card">
+    <h2>📅 경기 일정 가져오기</h2>
+    <div class="row">
+      <input id="gameDate" type="date">
+      <button class="act" onclick="fetchGames()">경기 가져오기</button>
+      <button class="act secondary" onclick="fetchStandings()">팀 스탯(순위) 갱신</button>
+    </div>
+    <div id="gamesStatus" class="status"></div>
+    <table id="gamesTable">
+      <thead><tr><th>경기</th><th>구장</th><th>상태</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- ============ 타자 리더보드 ============ -->
+  <section id="tab-batters" class="card hidden">
+    <h2>🏏 타자 리더보드 (OPS 상위)</h2>
+    <div class="row">
+      <button class="act" onclick="fetchBatterLeaders()">타자 리더보드 갱신</button>
+    </div>
+    <div id="battersStatus" class="status"></div>
+    <table id="battersTable">
+      <thead><tr><th>#</th><th>선수</th><th>팀</th><th>AVG</th><th>OBP</th><th>SLG</th><th>OPS</th><th>HR</th><th>RBI</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="row" style="margin-top:14px">
+      <select id="batterSelect"></select>
+      <select id="batterVsTeam"></select>
+      <button class="act secondary" onclick="analyzeBatterVsTeam()">상대팀 분석</button>
+    </div>
+    <div id="batterVsResult" class="factor"></div>
+  </section>
+
+  <!-- ============ 투수 리더보드 ============ -->
+  <section id="tab-pitchers2" class="card hidden">
+    <h2>⚾ 투수 리더보드 (ERA 상위)</h2>
+    <div class="row">
+      <button class="act" onclick="fetchPitcherLeaders()">투수 리더보드 갱신</button>
+    </div>
+    <div id="pitchersStatus" class="status"></div>
+    <table id="pitchersTable">
+      <thead><tr><th>#</th><th>선수</th><th>팀</th><th>ERA</th><th>WHIP</th><th>W-L</th><th>K</th><th>SV</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="row" style="margin-top:14px">
+      <select id="pitcherSelect"></select>
+      <select id="pitcherVsTeam"></select>
+      <button class="act secondary" onclick="analyzePitcherVsTeam()">상대팀 분석</button>
+    </div>
+    <div id="pitcherVsResult" class="factor"></div>
+  </section>
+
+  <!-- ============ 추천 ============ -->
+  <section id="tab-pick" class="card hidden">
+    <h2>🎯 추천 스코어</h2>
+    <p class="muted">가중치: 피타고리안 40% · 최근10경기 30% · 선발투수 매치업 20% · 홈/어웨이+상대전적 10%</p>
+    <div class="row">
+      <button class="act" onclick="runAllPredictions()">오늘 경기 전체 분석하기</button>
+    </div>
+    <div id="pickStatus" class="status"></div>
+    <div id="pickResults"></div>
+  </section>
+
+  <!-- ============ 배당입력 ============ -->
+  <section id="tab-odds" class="card hidden">
+    <h2>💰 참고 배당 입력 (해외 스포츠북 기준)</h2>
+    <div class="row">
+      <select id="oddsGameSelect"></select>
+    </div>
+    <div class="row">
+      <input id="oddsBookmaker" placeholder="북메이커 (예: DraftKings)" style="width:180px">
+      <input id="oddsHomeML" type="number" placeholder="홈 머니라인 (예: -150)" style="width:200px">
+      <input id="oddsAwayML" type="number" placeholder="어웨이 머니라인 (예: +130)" style="width:200px">
+    </div>
+    <div class="row">
+      <button class="act" onclick="saveOdds()">배당 저장</button>
+    </div>
+    <div id="oddsStatus" class="status"></div>
+  </section>
+
+  <!-- ============ 백테스트 ============ -->
+  <section id="tab-backtest" class="card hidden">
+    <h2>🔍 백테스트 / 적중률</h2>
+    <div class="row">
+      <button class="act" onclick="verifyResults()">경기결과로 적중여부 검증</button>
+    </div>
+    <div id="backtestStatus" class="status"></div>
+    <div id="backtestSummary" class="row"></div>
+    <table id="backtestTable">
+      <thead><tr><th>날짜</th><th>예측팀</th><th>실제결과</th><th>적중</th><th>신뢰도</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+</main>
+
+<script>
+let sb = null;
+const MLB_API = "https://statsapi.mlb.com/api/v1";
+
+// 개인용 Supabase 프로젝트 - 자동 연동
+const DEFAULT_SB_URL = "https://tfeeujepuxmnokbygpgw.supabase.co";
+const DEFAULT_SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRmZWV1amVwdXhtbm9rYnlncGd3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1MTg3MDgsImV4cCI6MjA4ODA5NDcwOH0.TAyPg2Fs2Uo0iYR4r2ffePXDn2dFtyp3EGoTthH5MXU";
+
+const TEAM_LIST = [
+  {id:108,name:"LA Angels"},{id:109,name:"Arizona Diamondbacks"},{id:110,name:"Baltimore Orioles"},
+  {id:111,name:"Boston Red Sox"},{id:112,name:"Chicago Cubs"},{id:113,name:"Cincinnati Reds"},
+  {id:114,name:"Cleveland Guardians"},{id:115,name:"Colorado Rockies"},{id:116,name:"Detroit Tigers"},
+  {id:117,name:"Houston Astros"},{id:118,name:"Kansas City Royals"},{id:119,name:"LA Dodgers"},
+  {id:120,name:"Washington Nationals"},{id:121,name:"New York Mets"},{id:133,name:"Oakland Athletics"},
+  {id:134,name:"Pittsburgh Pirates"},{id:135,name:"San Diego Padres"},{id:136,name:"Seattle Mariners"},
+  {id:137,name:"San Francisco Giants"},{id:138,name:"St. Louis Cardinals"},{id:139,name:"Tampa Bay Rays"},
+  {id:140,name:"Texas Rangers"},{id:141,name:"Toronto Blue Jays"},{id:142,name:"Minnesota Twins"},
+  {id:143,name:"Philadelphia Phillies"},{id:144,name:"Atlanta Braves"},{id:145,name:"Chicago White Sox"},
+  {id:146,name:"Miami Marlins"},{id:147,name:"New York Yankees"},{id:158,name:"Milwaukee Brewers"}
+];
+
+// ---------- 탭 전환 ----------
+document.querySelectorAll('#tabNav button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#tabNav button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('main > section').forEach(s=>s.classList.add('hidden'));
+    document.getElementById('tab-'+btn.dataset.tab).classList.remove('hidden');
+  });
+});
+
+// ---------- 초기 설정 로드 ----------
+window.addEventListener('load', ()=>{
+  connectSupabase(DEFAULT_SB_URL, DEFAULT_SB_KEY);
+
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('gameDate').value = today;
+
+  // 상대팀 분석용 드롭다운 채우기
+  ['batterVsTeam','pitcherVsTeam'].forEach(id=>{
+    const sel = document.getElementById(id);
+    TEAM_LIST.forEach(t=>{
+      const opt = document.createElement('option');
+      opt.value = t.id; opt.textContent = t.name;
+      sel.appendChild(opt);
+    });
+  });
+});
+
+function connectSupabase(url, key){
+  sb = supabase.createClient(url, key);
+  console.log('✅ Supabase 자동 연결됨');
+}
+
+function setStatus(id, msg, cls){
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'status ' + (cls||'');
+}
+
+function getSeason(){ return new Date().getFullYear(); }
+
+// ================= 경기 일정 가져오기 =================
+async function fetchGames(){
+  if(!sb){ setStatus('gamesStatus','먼저 설정 탭에서 Supabase를 연결해주세요','err'); return; }
+  const date = document.getElementById('gameDate').value;
+  setStatus('gamesStatus','불러오는 중...', '');
+  try{
+    const res = await fetch(`${MLB_API}/schedule?sportId=1&date=${date}&hydrate=team,probablePitcher,linescore`);
+    const data = await res.json();
+    const games = (data.dates && data.dates[0] && data.dates[0].games) || [];
+    if(games.length===0){ setStatus('gamesStatus','해당 날짜에 경기가 없어요','err'); return; }
+
+    for(const g of games){
+      const row = {
+        game_pk: g.gamePk,
+        game_date: date,
+        home_team: g.teams.home.team.name,
+        away_team: g.teams.away.team.name,
+        home_team_id: g.teams.home.team.id,
+        away_team_id: g.teams.away.team.id,
+        venue: g.venue ? g.venue.name : null,
+        home_score: g.teams.home.score ?? null,
+        away_score: g.teams.away.score ?? null,
+        status: g.status.detailedState
+      };
+      const { error: gErr } = await sb.from('mlb_games').upsert(row, { onConflict:'game_pk' });
+      if(gErr) throw new Error('games 저장 실패: '+gErr.message);
+
+      // raw 저장
+      await sb.from('mlb_raw_data').insert({
+        source_endpoint:'schedule', reference_id:String(g.gamePk), season:getSeason(), raw_json:g
+      });
+
+      // 날씨 저장
+      if(g.weather){
+        const isRain = /rain|shower|drizzle/i.test(g.weather.condition||'');
+        await sb.from('mlb_weather_log').upsert({
+          game_pk: g.gamePk,
+          condition: g.weather.condition || null,
+          temp: g.weather.temp ? parseInt(g.weather.temp) : null,
+          wind: g.weather.wind || null,
+          team_id: g.teams.home.team.id,
+          is_rain: isRain
+        }, { onConflict:'game_pk' });
+      }
+    }
+
+    setStatus('gamesStatus', `✅ ${games.length}경기 저장 완료`, 'ok');
+    renderGamesTable(games, date);
+    renderOddsGameSelect(games, date);
+  }catch(e){
+    setStatus('gamesStatus', '에러: '+e.message, 'err');
+  }
+}
+
+function renderGamesTable(games, date){
+  const tbody = document.querySelector('#gamesTable tbody');
+  tbody.innerHTML = '';
+  games.forEach(g=>{
+    const tr = document.createElement('tr');
+    const pHome = g.teams.home.probablePitcher ? g.teams.home.probablePitcher.fullName : '-';
+    const pAway = g.teams.away.probablePitcher ? g.teams.away.probablePitcher.fullName : '-';
+    tr.innerHTML = `
+      <td>${g.teams.away.team.name} @ ${g.teams.home.team.name}<br>
+          <span class="muted">선발: ${pAway} vs ${pHome}</span></td>
+      <td>${g.venue ? g.venue.name : '-'}</td>
+      <td>${g.status.detailedState}</td>
+      <td><button class="act secondary" onclick='fetchPitchers(${JSON.stringify(g).replace(/'/g,"&apos;")})'>투수 정보 갱신</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ================= 타자 리더보드 =================
+async function fetchBatterLeaders(){
+  if(!sb){ setStatus('battersStatus','먼저 Supabase를 연결해주세요','err'); return; }
+  setStatus('battersStatus','불러오는 중... (30명, 시간 좀 걸려요)', '');
+  const season = getSeason();
+  try{
+    const res = await fetch(`${MLB_API}/stats/leaders?leaderCategories=onBasePlusSlugging&statGroup=hitting&season=${season}&sportId=1&limit=30`);
+    const data = await res.json();
+    const leaders = data.leagueLeaders && data.leagueLeaders[0] ? data.leagueLeaders[0].leaders : [];
+    let rank = 1;
+    for(const l of leaders){
+      const pid = l.person.id;
+      const sres = await fetch(`${MLB_API}/people/${pid}/stats?stats=season&group=hitting&season=${season}`);
+      const sdata = await sres.json();
+      const stat = sdata.stats && sdata.stats[0] && sdata.stats[0].splits[0] ? sdata.stats[0].splits[0].stat : null;
+      if(!stat) { rank++; continue; }
+      await sb.from('mlb_batters').upsert({
+        player_id: pid, player_name: l.person.fullName, team_id: l.team.id, season,
+        avg: parseFloat(stat.avg)||null, obp: parseFloat(stat.obp)||null,
+        slg: parseFloat(stat.slg)||null, ops: parseFloat(stat.ops)||null,
+        home_runs: stat.homeRuns||0, rbi: stat.rbi||0, rank_ops: rank,
+        updated_at: new Date().toISOString()
+      }, { onConflict:'player_id,season' });
+      rank++;
+    }
+    setStatus('battersStatus', `✅ 타자 ${leaders.length}명 갱신 완료`, 'ok');
+    renderBattersTable(season);
+  }catch(e){
+    setStatus('battersStatus','에러: '+e.message,'err');
+  }
+}
+
+async function renderBattersTable(season){
+  const { data } = await sb.from('mlb_batters').select('*').eq('season', season).order('rank_ops');
+  const tbody = document.querySelector('#battersTable tbody');
+  const sel = document.getElementById('batterSelect');
+  tbody.innerHTML = ''; sel.innerHTML = '';
+  (data||[]).forEach(b=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${b.rank_ops}</td><td>${b.player_name}</td><td>${b.team_id}</td>
+      <td>${b.avg?.toFixed(3)??'-'}</td><td>${b.obp?.toFixed(3)??'-'}</td>
+      <td>${b.slg?.toFixed(3)??'-'}</td><td>${b.ops?.toFixed(3)??'-'}</td>
+      <td>${b.home_runs}</td><td>${b.rbi}</td><td></td>`;
+    tbody.appendChild(tr);
+    const opt = document.createElement('option');
+    opt.value = b.player_id; opt.textContent = b.player_name;
+    sel.appendChild(opt);
+  });
+}
+
+async function analyzeBatterVsTeam(){
+  const pid = document.getElementById('batterSelect').value;
+  const teamId = document.getElementById('batterVsTeam').value;
+  const season = getSeason();
+  if(!pid){ document.getElementById('batterVsResult').textContent = '먼저 리더보드를 갱신해주세요'; return; }
+  document.getElementById('batterVsResult').textContent = '조회 중...';
+  try{
+    const res = await fetch(`${MLB_API}/people/${pid}/stats?stats=vsTeam&opposingTeamId=${teamId}&season=${season}&group=hitting`);
+    const data = await res.json();
+    const stat = data.stats && data.stats[0] && data.stats[0].splits[0] ? data.stats[0].splits[0].stat : null;
+    const teamName = TEAM_LIST.find(t=>t.id==teamId)?.name;
+    document.getElementById('batterVsResult').textContent = stat
+      ? `상대 ${teamName}: AVG ${stat.avg??'-'} · OBP ${stat.obp??'-'} · SLG ${stat.slg??'-'} · OPS ${stat.ops??'-'} · HR ${stat.homeRuns??0} · 타석 ${stat.plateAppearances??0}`
+      : `상대 ${teamName} 기록 없음 (이 시즌 맞대결 데이터 부족)`;
+  }catch(e){
+    document.getElementById('batterVsResult').textContent = '에러: '+e.message;
+  }
+}
+
+// ================= 투수 리더보드 =================
+async function fetchPitcherLeaders(){
+  if(!sb){ setStatus('pitchersStatus','먼저 Supabase를 연결해주세요','err'); return; }
+  setStatus('pitchersStatus','불러오는 중... (30명, 시간 좀 걸려요)', '');
+  const season = getSeason();
+  try{
+    const res = await fetch(`${MLB_API}/stats/leaders?leaderCategories=earnedRunAverage&statGroup=pitching&season=${season}&sportId=1&limit=30&sortOrder=asc`);
+    const data = await res.json();
+    const leaders = data.leagueLeaders && data.leagueLeaders[0] ? data.leagueLeaders[0].leaders : [];
+    let rank = 1;
+    for(const l of leaders){
+      const pid = l.person.id;
+      const sres = await fetch(`${MLB_API}/people/${pid}/stats?stats=season&group=pitching&season=${season}`);
+      const sdata = await sres.json();
+      const stat = sdata.stats && sdata.stats[0] && sdata.stats[0].splits[0] ? sdata.stats[0].splits[0].stat : null;
+      if(!stat) { rank++; continue; }
+      await sb.from('mlb_pitcher_leaderboard').upsert({
+        player_id: pid, player_name: l.person.fullName, team_id: l.team.id, season,
+        era: parseFloat(stat.era)||null, whip: parseFloat(stat.whip)||null,
+        wins: stat.wins||0, losses: stat.losses||0, strikeouts: stat.strikeOuts||0,
+        saves: stat.saves||0, rank_era: rank, updated_at: new Date().toISOString()
+      }, { onConflict:'player_id,season' });
+      rank++;
+    }
+    setStatus('pitchersStatus', `✅ 투수 ${leaders.length}명 갱신 완료`, 'ok');
+    renderPitchersTable(season);
+  }catch(e){
+    setStatus('pitchersStatus','에러: '+e.message,'err');
+  }
+}
+
+async function renderPitchersTable(season){
+  const { data } = await sb.from('mlb_pitcher_leaderboard').select('*').eq('season', season).order('rank_era');
+  const tbody = document.querySelector('#pitchersTable tbody');
+  const sel = document.getElementById('pitcherSelect');
+  tbody.innerHTML = ''; sel.innerHTML = '';
+  (data||[]).forEach(p=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${p.rank_era}</td><td>${p.player_name}</td><td>${p.team_id}</td>
+      <td>${p.era?.toFixed(2)??'-'}</td><td>${p.whip?.toFixed(2)??'-'}</td>
+      <td>${p.wins}-${p.losses}</td><td>${p.strikeouts}</td><td>${p.saves}</td><td></td>`;
+    tbody.appendChild(tr);
+    const opt = document.createElement('option');
+    opt.value = p.player_id; opt.textContent = p.player_name;
+    sel.appendChild(opt);
+  });
+}
+
+async function analyzePitcherVsTeam(){
+  const pid = document.getElementById('pitcherSelect').value;
+  const teamId = document.getElementById('pitcherVsTeam').value;
+  const season = getSeason();
+  if(!pid){ document.getElementById('pitcherVsResult').textContent = '먼저 리더보드를 갱신해주세요'; return; }
+  document.getElementById('pitcherVsResult').textContent = '조회 중...';
+  try{
+    const res = await fetch(`${MLB_API}/people/${pid}/stats?stats=vsTeam&opposingTeamId=${teamId}&season=${season}&group=pitching`);
+    const data = await res.json();
+    const stat = data.stats && data.stats[0] && data.stats[0].splits[0] ? data.stats[0].splits[0].stat : null;
+    const teamName = TEAM_LIST.find(t=>t.id==teamId)?.name;
+    document.getElementById('pitcherVsResult').textContent = stat
+      ? `상대 ${teamName}: ERA ${stat.era??'-'} · WHIP ${stat.whip??'-'} · 피안타율 ${stat.avg??'-'} · K ${stat.strikeOuts??0} · IP ${stat.inningsPitched??0}`
+      : `상대 ${teamName} 기록 없음 (이 시즌 맞대결 데이터 부족)`;
+  }catch(e){
+    document.getElementById('pitcherVsResult').textContent = '에러: '+e.message;
+  }
+}
+
+// ================= 팀 스탯(순위) 갱신 =================
+async function fetchStandings(){
+  if(!sb){ setStatus('gamesStatus','먼저 Supabase를 연결해주세요','err'); return; }
+  setStatus('gamesStatus','팀 스탯 불러오는 중...', '');
+  try{
+    const season = getSeason();
+    const res = await fetch(`${MLB_API}/standings?leagueId=103,104&season=${season}&standingsTypes=regularSeason`);
+    const data = await res.json();
+    let count = 0;
+    for(const rec of data.records){
+      for(const tr of rec.teamRecords){
+        const home = (tr.records.splitRecords||[]).find(s=>s.type==='home');
+        const away = (tr.records.splitRecords||[]).find(s=>s.type==='away');
+        const last10 = (tr.records.splitRecords||[]).find(s=>s.type==='lastTen');
+        const rs = tr.runsScored ?? null;
+        const ra = tr.runsAllowed ?? null;
+        const pyth = (rs && ra) ? Math.pow(rs,2)/(Math.pow(rs,2)+Math.pow(ra,2)) : null;
+
+        const { error: tErr } = await sb.from('mlb_team_stats').upsert({
+          team_id: tr.team.id,
+          team_name: tr.team.name,
+          season: season,
+          wins: tr.leagueRecord.wins,
+          losses: tr.leagueRecord.losses,
+          win_pct: parseFloat(tr.leagueRecord.pct),
+          runs_scored: rs,
+          runs_allowed: ra,
+          pyth_win_pct: pyth,
+          home_wins: home ? home.wins : null,
+          home_losses: home ? home.losses : null,
+          away_wins: away ? away.wins : null,
+          away_losses: away ? away.losses : null,
+          last10_wins: last10 ? last10.wins : null,
+          last10_losses: last10 ? last10.losses : null,
+          updated_at: new Date().toISOString()
+        }, { onConflict:'team_id,season' });
+        if(tErr) throw new Error('team_stats 저장 실패: '+tErr.message);
+
+        // 좌/우완 상대 타격 스플릿
+        await fetchTeamBattingSplit(tr.team.id, season, 'vl', 'vs_lhp');
+        await fetchTeamBattingSplit(tr.team.id, season, 'vr', 'vs_rhp');
+
+        await sb.from('mlb_raw_data').insert({
+          source_endpoint:'standings', reference_id:String(tr.team.id), season, raw_json:tr
+        });
+        count++;
+      }
+    }
+    setStatus('gamesStatus', `✅ ${count}개 팀 스탯 갱신 완료`, 'ok');
+  }catch(e){
+    setStatus('gamesStatus','에러: '+e.message,'err');
+  }
+}
+
+async function fetchTeamBattingSplit(teamId, season, sitCode, splitType){
+  try{
+    const res = await fetch(`${MLB_API}/teams/${teamId}/stats?stats=statSplits&sitCodes=${sitCode}&group=hitting&season=${season}`);
+    const data = await res.json();
+    const stat = data.stats && data.stats[0] && data.stats[0].splits && data.stats[0].splits[0]
+      ? data.stats[0].splits[0].stat : null;
+    if(!stat) return;
+    await sb.from('mlb_batting_splits').upsert({
+      team_id: teamId, season, split_type: splitType,
+      avg: parseFloat(stat.avg) || null,
+      obp: parseFloat(stat.obp) || null,
+      slg: parseFloat(stat.slg) || null,
+      ops: parseFloat(stat.ops) || null,
+      updated_at: new Date().toISOString()
+    }, { onConflict:'team_id,season,split_type' });
+  }catch(e){ console.error('타격 스플릿 에러', e); }
+}
+
+// ================= 투수 정보 갱신 =================
+async function fetchPitchers(game){
+  const season = getSeason();
+  try{
+    for(const side of ['home','away']){
+      const team = game.teams[side];
+      const p = team.probablePitcher;
+      if(!p) continue;
+      const res = await fetch(`${MLB_API}/people/${p.id}/stats?stats=season&group=pitching&season=${season}`);
+      const data = await res.json();
+      const stat = data.stats && data.stats[0] && data.stats[0].splits[0] ? data.stats[0].splits[0].stat : null;
+      if(!stat) continue;
+
+      const ip = parseFloat(stat.inningsPitched) || 0;
+      const hr = stat.homeRuns || 0;
+      const bb = stat.baseOnBalls || 0;
+      const hbp = stat.hitByPitch || 0;
+      const k = stat.strikeOuts || 0;
+      const fip = ip>0 ? (((13*hr)+(3*(bb+hbp))-(2*k))/ip + 3.10) : null;
+
+      await sb.from('mlb_pitchers').upsert({
+        player_id: p.id,
+        player_name: p.fullName,
+        team_id: team.team.id,
+        season: season,
+        era: parseFloat(stat.era) || null,
+        fip: fip,
+        whip: parseFloat(stat.whip) || null,
+        wins: stat.wins, losses: stat.losses,
+        innings_pitched: ip,
+        strikeouts: k,
+        updated_at: new Date().toISOString()
+      }, { onConflict:'player_id,season' });
+
+      await sb.from('mlb_raw_data').insert({
+        source_endpoint:'pitcher_stats', reference_id:String(p.id), season, raw_json:data
+      });
+
+      // 좌/우타자 상대 스플릿
+      await fetchPitcherSplit(p.id, season, 'vl', 'vs_lhb');
+      await fetchPitcherSplit(p.id, season, 'vr', 'vs_rhb');
+    }
+    alert('투수 정보 갱신 완료!');
+  }catch(e){
+    alert('에러: '+e.message);
+  }
+}
+
+async function fetchPitcherSplit(playerId, season, sitCode, splitType){
+  try{
+    const res = await fetch(`${MLB_API}/people/${playerId}/stats?stats=statSplits&sitCodes=${sitCode}&group=pitching&season=${season}`);
+    const data = await res.json();
+    const stat = data.stats && data.stats[0] && data.stats[0].splits && data.stats[0].splits[0]
+      ? data.stats[0].splits[0].stat : null;
+    if(!stat) return;
+    await sb.from('mlb_pitching_splits').upsert({
+      player_id: playerId, season, split_type: splitType,
+      avg_against: parseFloat(stat.avg) || null,
+      obp_against: parseFloat(stat.obp) || null,
+      slg_against: parseFloat(stat.slg) || null,
+      ops_against: parseFloat(stat.ops) || null,
+      updated_at: new Date().toISOString()
+    }, { onConflict:'player_id,season,split_type' });
+  }catch(e){ console.error('투수 스플릿 에러', e); }
+}
+
+// ================= 상대전적 계산 (DB 내 저장된 경기 기준) =================
+async function calcH2H(teamA, teamB, season){
+  const { data, error } = await sb.from('mlb_games')
+    .select('*')
+    .eq('game_date', undefined); // placeholder, replaced below
+  // 실제 쿼리: 두 팀이 맞붙은 완료 경기 전체
+  const { data: games } = await sb.from('mlb_games')
+    .select('*')
+    .or(`and(home_team_id.eq.${teamA},away_team_id.eq.${teamB}),and(home_team_id.eq.${teamB},away_team_id.eq.${teamA})`)
+    .eq('status','Final');
+
+  let aWins=0, bWins=0, lastDate=null;
+  (games||[]).forEach(g=>{
+    if(g.home_score==null || g.away_score==null) return;
+    const homeWon = g.home_score > g.away_score;
+    const winnerId = homeWon ? g.home_team_id : g.away_team_id;
+    if(winnerId===teamA) aWins++; else if(winnerId===teamB) bWins++;
+    if(!lastDate || g.game_date > lastDate) lastDate = g.game_date;
+  });
+
+  await sb.from('mlb_h2h').upsert({
+    team_a_id: teamA, team_b_id: teamB, season,
+    team_a_wins: aWins, team_b_wins: bWins, last_meeting_date: lastDate,
+    updated_at: new Date().toISOString()
+  }, { onConflict:'team_a_id,team_b_id,season' });
+
+  return { aWins, bWins };
+}
+
+// ================= 추천 스코어링 =================
+function normalize(val, min, max){
+  if(val==null) return 50;
+  const v = Math.max(min, Math.min(max, val));
+  return ((v-min)/(max-min))*100;
+}
+
+async function runAllPredictions(){
+  if(!sb){ setStatus('pickStatus','먼저 Supabase를 연결해주세요','err'); return; }
+  setStatus('pickStatus','분석 중...', '');
+  const date = document.getElementById('gameDate').value;
+  const season = getSeason();
+
+  const { data: games, error } = await sb.from('mlb_games').select('*').eq('game_date', date);
+  if(error || !games || games.length===0){
+    setStatus('pickStatus','오늘 경기 데이터가 없어요. 먼저 "오늘 경기" 탭에서 가져와주세요','err');
+    return;
+  }
+
+  const { data: teamStats } = await sb.from('mlb_team_stats').select('*').eq('season', season);
+  const tsMap = {}; (teamStats||[]).forEach(t=>tsMap[t.team_id]=t);
+
+  const resultsDiv = document.getElementById('pickResults');
+  resultsDiv.innerHTML = '';
+
+  for(const g of games){
+    const home = tsMap[g.home_team_id];
+    const away = tsMap[g.away_team_id];
+
+    // 1. 피타고리안 (40%)
+    const pythHome = home ? home.pyth_win_pct*100 : 50;
+    const pythAway = away ? away.pyth_win_pct*100 : 50;
+
+    // 2. 최근10경기 (30%)
+    const l10Home = home ? normalize(home.last10_wins,0,10) : 50;
+    const l10Away = away ? normalize(away.last10_wins,0,10) : 50;
+
+    // 3. 선발투수 매치업 (20%) - FIP 낮을수록 좋음, DB에서 조회
+    const { data: pitchers } = await sb.from('mlb_pitchers').select('*').eq('season', season);
+    const pMap = {}; (pitchers||[]).forEach(p=>pMap[p.player_id]=p);
+    // 확률투수 매칭은 raw_json에서 가져와야 하나, 간단화를 위해 팀별 최근 등록 투수 사용은 생략
+    const fipHome = 50, fipAway = 50; // 상세 매칭은 "투수 정보 갱신" 후 수동 확인 권장
+
+    // 4. 홈/어웨이+상대전적 (10%)
+    const h2h = await calcH2H(g.home_team_id, g.away_team_id, season);
+    const h2hTotal = h2h.aWins + h2h.bWins;
+    const h2hHome = h2hTotal>0 ? (h2h.aWins/h2hTotal)*100 : 50;
+    const h2hAway = h2hTotal>0 ? (h2h.bWins/h2hTotal)*100 : 50;
+
+    const homeScore = pythHome*0.4 + l10Home*0.3 + fipHome*0.2 + h2hHome*0.1;
+    const awayScore = pythAway*0.4 + l10Away*0.3 + fipAway*0.2 + h2hAway*0.1;
+
+    const winner = homeScore >= awayScore ? g.home_team_id : g.away_team_id;
+    const winnerName = homeScore >= awayScore ? g.home_team : g.away_team;
+    const confidence = Math.abs(homeScore-awayScore);
+    let tagClass = 'weak', tagLabel = '박빙';
+    if(confidence>15){ tagClass='strong'; tagLabel='우세'; }
+    else if(confidence>7){ tagClass='mid'; tagLabel='약우세'; }
+
+    await sb.from('mlb_predictions').insert({
+      game_pk: g.game_pk,
+      predicted_winner_id: winner,
+      confidence_score: confidence,
+      key_factors: { pythHome, pythAway, l10Home, l10Away, h2hHome, h2hAway }
+    });
+
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `
+      <b>${g.away_team} @ ${g.home_team}</b>
+      <span class="tag ${tagClass}">${tagLabel} → ${winnerName}</span>
+      <div class="factor">
+        피타고리안 ${pythHome.toFixed(1)} vs ${pythAway.toFixed(1)} ·
+        최근10 ${l10Home.toFixed(0)} vs ${l10Away.toFixed(0)} ·
+        상대전적 ${h2h.aWins}-${h2h.bWins} ·
+        신뢰도 점수차 ${confidence.toFixed(1)}
+      </div>
+    `;
+    resultsDiv.appendChild(div);
+  }
+
+  setStatus('pickStatus', `✅ ${games.length}경기 분석 완료`, 'ok');
+}
+
+// ================= 배당 입력 =================
+function renderOddsGameSelect(games, date){
+  const sel = document.getElementById('oddsGameSelect');
+  sel.innerHTML = '';
+  games.forEach(g=>{
+    const opt = document.createElement('option');
+    opt.value = g.gamePk;
+    opt.textContent = `${g.teams.away.team.name} @ ${g.teams.home.team.name} (${date})`;
+    sel.appendChild(opt);
+  });
+}
+
+async function saveOdds(){
+  if(!sb){ setStatus('oddsStatus','먼저 Supabase를 연결해주세요','err'); return; }
+  const gamePk = document.getElementById('oddsGameSelect').value;
+  const bookmaker = document.getElementById('oddsBookmaker').value.trim();
+  const homeML = parseInt(document.getElementById('oddsHomeML').value);
+  const awayML = parseInt(document.getElementById('oddsAwayML').value);
+  if(!gamePk || !bookmaker){ setStatus('oddsStatus','경기와 북메이커를 입력해주세요','err'); return; }
+
+  try{
+    await sb.from('mlb_odds').insert({
+      game_pk: parseInt(gamePk), bookmaker, home_ml: homeML, away_ml: awayML
+    });
+    setStatus('oddsStatus','✅ 배당 저장 완료','ok');
+  }catch(e){
+    setStatus('oddsStatus','에러: '+e.message,'err');
+  }
+}
+
+// ================= 백테스트 =================
+async function verifyResults(){
+  if(!sb){ setStatus('backtestStatus','먼저 Supabase를 연결해주세요','err'); return; }
+  setStatus('backtestStatus','검증 중...', '');
+  try{
+    const { data: preds } = await sb.from('mlb_predictions').select('*').is('actual_winner_id', null);
+    let updated = 0;
+    for(const p of preds||[]){
+      const { data: gArr } = await sb.from('mlb_games').select('*').eq('game_pk', p.game_pk).eq('status','Final');
+      const g = gArr && gArr[0];
+      if(!g || g.home_score==null || g.away_score==null) continue;
+      const actualWinner = g.home_score > g.away_score ? g.home_team_id : g.away_team_id;
+      const isCorrect = actualWinner === p.predicted_winner_id;
+      await sb.from('mlb_predictions').update({
+        actual_winner_id: actualWinner, is_correct: isCorrect
+      }).eq('id', p.id);
+      updated++;
+    }
+    setStatus('backtestStatus', `✅ ${updated}건 검증 완료`, 'ok');
+    renderBacktest();
+  }catch(e){
+    setStatus('backtestStatus','에러: '+e.message,'err');
+  }
+}
+
+async function renderBacktest(){
+  const { data: preds } = await sb.from('mlb_predictions').select('*, ').not('is_correct','is',null);
+  const { data: games } = await sb.from('mlb_games').select('*');
+  const gMap = {}; (games||[]).forEach(g=>gMap[g.game_pk]=g);
+
+  const tbody = document.querySelector('#backtestTable tbody');
+  tbody.innerHTML = '';
+  let correct=0, total=0;
+  (preds||[]).forEach(p=>{
+    total++; if(p.is_correct) correct++;
+    const g = gMap[p.game_pk];
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${g ? g.game_date : '-'}</td>
+      <td>${p.predicted_winner_id}</td>
+      <td>${p.actual_winner_id}</td>
+      <td>${p.is_correct ? '✅' : '❌'}</td>
+      <td>${p.confidence_score ? p.confidence_score.toFixed(1) : '-'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const acc = total>0 ? (correct/total*100).toFixed(1) : 0;
+  document.getElementById('backtestSummary').innerHTML = `
+    <b>적중률: ${acc}% (${correct}/${total})</b>
+  `;
+}
+</script>
+</body>
+</html>
